@@ -279,6 +279,7 @@ dependencies:
     - executing==2.0.1
     - fastjsonschema==2.19.1
     - fqdn==1.5.1
+    - gcsfs
     - gradient-descent-the-ultimate-optimizer==1.0
     - h11==0.14.0
     - h5py==3.11.0
