@@ -39,6 +39,16 @@ logging.getLogger('matplotlib').setLevel(logging.ERROR)
 def to_cftime(dt):
     return cftime.DatetimeGregorian(dt.astype(object).year, dt.astype(object).month, dt.astype(object).day, dt.astype(object).hour, dt.astype(object).minute)
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    if v.lower() in ("yes", "true", "t", "1"):
+        return True
+    elif v.lower() in ("no", "false", "f", "0"):
+        return False
+    else:
+        raise argparse.ArgumentTypeError("Boolean value expected.")
+    
 def _get_datetime_range(start, end_date, time_step):
 
     if len(start) > 1:
@@ -461,8 +471,12 @@ def coupled_inference_hdf5(args: argparse.Namespace):
         ocean_output_file = os.path.join(args.output_directory, f"forecast_{ocean_model_name}.nc")
         atmos_output_file = os.path.join(args.output_directory, f"forecast_{atmos_model_name}.nc")
     logger.info(f"writing forecasts to {atmos_output_file} and {ocean_output_file}")
-    ocean_write_job = ocean_prediction_ds.to_netcdf(ocean_output_file, compute=False)
-    atmos_write_job = atmos_prediction_ds.to_netcdf(atmos_output_file, compute=False)
+    if args.zarr:
+        ocean_write_job = ocean_prediction_ds.to_zarr(ocean_output_file, compute=False, mode="w")
+        atmos_write_job = atmos_prediction_ds.to_zarr(atmos_output_file, compute=False, mode="w")
+    else:
+        ocean_write_job = ocean_prediction_ds.to_netcdf(ocean_output_file, compute=False)
+        atmos_write_job = atmos_prediction_ds.to_netcdf(atmos_output_file, compute=False)
     with ProgressBar():
         ocean_write_job.compute()
         atmos_write_job.compute()
@@ -531,6 +545,8 @@ if __name__ == '__main__':
                         help="Last time in forecast. Only used if forecast is using datetime64")
     parser.add_argument('--gpu', type=int, default=0,
                         help="Index of GPU device on which to run model. If -1 forecast will be done on CPU")
+    parser.add_argument('--zarr', type=str2bool, default=False, const=True, nargs="?",
+                        help="Whether the output directory is for writing a zarr file.")
 
     configure_logging(2)
     run_args = parser.parse_args()
