@@ -15,7 +15,7 @@ DEVICE_NUMBERS="-1"
 CACHE_DIR="./output_data"
 
 # Destination directory for forecast files
-OUTPUT_DIR="gs://dlesym-output-storage"
+OUTPUT_DIR="gs://dlesym-storage"
 ZARR="true"
 # Output logs sent here
 OUTPUT_FILE="${CACHE_DIR}/1week_forecast.out"
