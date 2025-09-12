@@ -8,7 +8,7 @@
 # Path to DLESyM module
 MODULE_DIR="./"
 # set to -1 to use CPU
-DEVICE_NUMBERS="-1"
+DEVICE_NUMBERS="0"
 
 ################ Forecast Params ################
 
