@@ -6,7 +6,7 @@
 
 ################ Environment Params ################
 # Path to DLESyM module
-MODULE_DIR="./"
+MODULE_DIR="/workspace/DLESyM"
 # set to -1 to use CPU
 DEVICE_NUMBERS="0"
 
