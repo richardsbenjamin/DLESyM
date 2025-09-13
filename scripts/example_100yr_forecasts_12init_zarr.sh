@@ -19,7 +19,7 @@ CACHE_DIR="./output_data"
 OUTPUT_DIR="gs://dlesym-storage"
 ZARR="true"
 # Output logs sent here
-OUTPUT_FILE="${OUTPUT_DIR}/100yr_forecasts.out"
+OUTPUT_FILE="${CACHE_DIR}/100yr_forecasts.out"
 # Path to models 
 ATMOS_MODEL="${MODULE_DIR}/models/dlwp"
 OCEAN_MODEL="${MODULE_DIR}/models/dlom"
