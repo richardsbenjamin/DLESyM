@@ -22,7 +22,7 @@ Before messing around with DLESyM, you'll need to set up the repository and envi
 
 1.  Clone the repository:
     ```sh
-    git clone https://github.com/AtmosSci-DLESM/DLESyM.git
+    git clone https://github.com/richardsbenjamin/DLESyM.git
     ```
 
 2. Ensure LFS files are included
