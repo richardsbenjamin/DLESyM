@@ -71,8 +71,8 @@ do
         --step-chunk ${STEP_CHUNK} \
         --cache-dir ${CACHE_DIR} \
         --output-directory ${OUTPUT_DIR} \
-        --atmos-output-filename atmos_hpx64_coupled-dlwp-olr_seed0+hpx64_coupled-dlom-olr_unet_dil-124_double_restart_100year${ATMOS_OUTPUT_FILENAME_SUFFIXES[$i]} \
-        --ocean-output-filename ocean_hpx64_coupled-dlwp-olr_seed0+hpx64_coupled-dlom-olr_unet_dil-124_double_restart_100year${OCEAN_OUTPUT_FILENAME_SUFFIXES[$i]} \
+        --atmos-output-filename atmos_hpx64_1week \
+        --ocean-output-filename ocean_hpx64_1week \
         --data-directory ${DATA_DIR} \
         --atmos-dataset-name ${ATMOS_DATASET_NAME} \
         --ocean-dataset-name ${OCEAN_DATASET_NAME} \
