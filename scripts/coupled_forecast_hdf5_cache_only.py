@@ -10,7 +10,7 @@ import argparse
 import os
 from pathlib import Path
 import time
-import gcsfs
+import pickle
 
 from hydra import initialize, compose
 from omegaconf import OmegaConf, open_dict
@@ -35,6 +35,10 @@ from scripts.coupled_forecast import get_coupled_time_dim
 logger = logging.getLogger(__name__)
 logging.getLogger('cfgrib').setLevel(logging.ERROR)
 logging.getLogger('matplotlib').setLevel(logging.ERROR)
+
+
+import json
+import argparse
 
 # Function to convert numpy.datetime64 to cftime.DatetimeGregorian
 def to_cftime(dt):
@@ -382,120 +386,27 @@ def coupled_inference_hdf5(args: argparse.Namespace):
                 ocean_prediction[i*batch_size:(i+1)*batch_size, slice(1+j*ocean_coupled_time_dim,(j+1)*ocean_coupled_time_dim+1), :, :, :, :] = ocean_output.permute(0, 2, 3, 1, 4, 5).cpu().numpy()
                 atmos_prediction[i*batch_size:(i+1)*batch_size, slice(1+j*atmos_coupled_time_dim,(j+1)*atmos_coupled_time_dim+1), :, :, :, :] = atmos_output.permute(0, 2, 3, 1, 4, 5).cpu().numpy()
 
-    # open the hdf5 files and read the predictions into dask arrays for manipulation and saving
-    f_atmos = h5py.File(f'{args.cache_dir}/atmos_prediction.hdf5', 'r')
-    f_ocean = h5py.File(f'{args.cache_dir}/ocean_prediction.hdf5', 'r')
-    atmos_prediction = da.from_array(f_atmos['atmos_prediction'], 
-                                        chunks=(args.time_chunk, 
-                                                args.step_chunk, 
-                                                atmos_prediction_shape[2],
-                                                atmos_prediction_shape[3],
-                                                atmos_prediction_shape[4],
-                                                atmos_prediction_shape[5],))
-    ocean_prediction = da.from_array(f_ocean['ocean_prediction'], 
-                                        chunks=(args.time_chunk, 
-                                                args.step_chunk, 
-                                                ocean_prediction_shape[2],
-                                                ocean_prediction_shape[3],
-                                                ocean_prediction_shape[4],
-                                                ocean_prediction_shape[5],))
-           
-    # Generate dataarray with coordinates
-    ocean_meta_ds = ocean_data_module.test_dataset.ds
-    atmos_meta_ds = atmos_data_module.test_dataset.ds
+    # END OF SCRIPT 1 - The 'with h5py.File' block ends here, files are safely on disk.
+    cache_out = {
+        'args': args,
+        'atmos_prediction_shape': atmos_prediction_shape,
+        'ocean_prediction_shape': ocean_prediction_shape,
+        'ocean_data_module': ocean_data_module,
+        'atmos_data_module': atmos_data_module,
+        "first_step_datetime_ocean": first_step_datetime_ocean,
+        "first_step_datetime_atmos": first_step_datetime_atmos,
+        "ocean_output_lead_times": ocean_output_lead_times,
+        "atmos_output_lead_times": atmos_output_lead_times,
+        "forecast_dates": forecast_dates,
+        "ocean_cfg": ocean_cfg,
+        "atmos_cfg": atmos_cfg,
+    }
 
-    # organize steps arrays, invoking cftime if necessary
-    if args.datetime:
-        ocean_steps = [to_cftime(lt) for lt in [first_step_datetime_ocean] + list(ocean_output_lead_times)]
-        atmos_steps = [to_cftime(lt) for lt in [first_step_datetime_atmos] + list(atmos_output_lead_times)]
-        forecast_dates = [to_cftime(f.astype('datetime64[m]')) for f in forecast_dates]
-    else:
-        ocean_steps = [pd.Timedelta(hours=0)] + list(ocean_output_lead_times)
-        atmos_steps = [pd.Timedelta(hours=0)] + list(atmos_output_lead_times)
-    # initialize data arrays
-    ocean_prediction_da = xr.DataArray(
-        ocean_prediction,
-        dims=['time', 'step', 'channel_out', 'face', 'height', 'width'],
-        coords={
-            'time': forecast_dates,
-            'step': ocean_steps,
-            'channel_out': ocean_cfg.data.output_variables or ocean_cfg.data.input_variables,
-            'face': ocean_meta_ds.face,
-            'height': ocean_meta_ds.height,
-            'width': ocean_meta_ds.width
-        }
-    )
-    atmos_prediction_da = xr.DataArray(
-        atmos_prediction,
-        dims=['time', 'step', 'channel_out', 'face', 'height', 'width'],
-        coords={
-            'time': forecast_dates,
-            'step': atmos_steps,
-            'channel_out': atmos_cfg.data.output_variables or atmos_cfg.data.input_variables,
-            'face': atmos_meta_ds.face,
-            'height': atmos_meta_ds.height,
-            'width': atmos_meta_ds.width
-        }
-    )
+    with open(f'{args.cache_dir}/args.pkl', 'wb') as f:
+        pickle.dump(cache_out, f)
 
-    # Re-scale prediction
-    ocean_prediction_da[:] *= ocean_data_module.test_dataset.target_scaling['std']
-    ocean_prediction_da[:] += ocean_data_module.test_dataset.target_scaling['mean']
-    ocean_prediction_ds = ocean_prediction_da.to_dataset(dim='channel_out')
-    for variable in ocean_prediction_ds.data_vars:
-        if ocean_cfg.data.scaling[variable].get('log_epsilon', None) is not None:
-            ocean_prediction_ds[variable] = np.exp(
-                ocean_prediction_ds[variable] + np.log(ocean_cfg.data.scaling[variable]['log_epsilon'])
-            ) - ocean_cfg.data.scaling[variable]['log_epsilon']
-    atmos_prediction_da[:] *= atmos_data_module.test_dataset.target_scaling['std']
-    atmos_prediction_da[:] += atmos_data_module.test_dataset.target_scaling['mean']
-    atmos_prediction_ds = atmos_prediction_da.to_dataset(dim='channel_out')
-    for variable in atmos_prediction_ds.data_vars:
-        if atmos_cfg.data.scaling[variable].get('log_epsilon', None) is not None:
-            atmos_prediction_ds[variable] = np.exp(
-                atmos_prediction_ds[variable] + np.log(atmos_cfg.data.scaling[variable]['log_epsilon'])
-            ) - atmos_cfg.data.scaling[variable]['log_epsilon']
+    logger.info(f"Model run complete. Raw HDF5 files safely staged in {args.cache_dir}")
 
-    # Export dataset
-    write_time = time.time()
-    ocean_prediction_ds = to_chunked_dataset(ocean_prediction_ds, {'time': args.time_chunk,'step': args.step_chunk})
-    atmos_prediction_ds = to_chunked_dataset(atmos_prediction_ds, {'time': args.time_chunk,'step': args.step_chunk})
-    if args.encode_int:
-        ocean_prediction_ds = encode_variables_as_int(ocean_prediction_ds, compress=1)
-        atmos_prediction_ds = encode_variables_as_int(atmos_prediction_ds, compress=1)
-
-    if getattr(args,'ocean_output_filename',None) is not None:
-        ocean_output_file = os.path.join(args.output_directory, f"{args.ocean_output_filename}.nc")
-    if getattr(args,'atmos_output_filename',None) is not None:
-        atmos_output_file = os.path.join(args.output_directory, f"{args.atmos_output_filename}.nc")
-    else:
-        ocean_output_file = os.path.join(args.output_directory, f"forecast_{ocean_model_name}.nc")
-        atmos_output_file = os.path.join(args.output_directory, f"forecast_{atmos_model_name}.nc")
-    logger.info(f"writing forecasts to {atmos_output_file} and {ocean_output_file}")
-    if args.zarr:
-        fs = gcsfs.GCSFileSystem()
-        
-        ocean_zarr_path = ocean_output_file.replace('.nc', '.zarr').lstrip('/')
-        atmos_zarr_path = atmos_output_file.replace('.nc', '.zarr').lstrip('/')
-        
-        ocean_store = gcsfs.GCSMap(ocean_zarr_path, gcs=fs, create=True)
-        atmos_store = gcsfs.GCSMap(atmos_zarr_path, gcs=fs, create=True)
-        
-        ocean_write_job = ocean_prediction_ds.to_zarr(ocean_store, compute=False, mode="w")
-        atmos_write_job = atmos_prediction_ds.to_zarr(atmos_store, compute=False, mode="w")
-    else:
-        ocean_write_job = ocean_prediction_ds.to_netcdf(ocean_output_file, compute=False)
-        atmos_write_job = atmos_prediction_ds.to_netcdf(atmos_output_file, compute=False)
-    with ProgressBar():
-        ocean_write_job.compute()
-        atmos_write_job.compute()
-    logger.debug("wrote file in %0.1f s", time.time() - write_time)
-
-    # clean up temporary files
-    f_atmos.close()
-    f_ocean.close()
-    os.remove(f'{args.cache_dir}/atmos_prediction.hdf5')
-    os.remove(f'{args.cache_dir}/ocean_prediction.hdf5')
 
 
 if __name__ == '__main__':
