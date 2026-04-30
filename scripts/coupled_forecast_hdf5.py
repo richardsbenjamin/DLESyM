@@ -32,9 +32,25 @@ from training.dlwp.utils import to_chunked_dataset, encode_variables_as_int, con
 from scripts.forecast import _convert_time_step, get_forecast_dates, read_forecast_dates_from_file, get_latest_version
 from scripts.coupled_forecast import get_coupled_time_dim
 
+import psutil
+import os
+
+
+
 logger = logging.getLogger(__name__)
 logging.getLogger('cfgrib').setLevel(logging.ERROR)
 logging.getLogger('matplotlib').setLevel(logging.ERROR)
+
+
+def log_memory(label):
+    process = psutil.Process(os.getpid())
+    mem = process.memory_info()
+    vm = psutil.virtual_memory()
+    logger.info(
+        f"[MEM] {label} | process RSS: {mem.rss/1e9:.2f} GB | "
+        f"system available: {vm.available/1e9:.2f} GB | "
+        f"system used: {vm.used/1e9:.2f} GB ({vm.percent}%)"
+    )
 
 # Function to convert numpy.datetime64 to cftime.DatetimeGregorian
 def to_cftime(dt):
@@ -186,6 +202,8 @@ def coupled_inference_hdf5(args: argparse.Namespace):
     if args.datetime:
         atmos_data_module.set_datetime()
         ocean_data_module.set_datetime()
+
+    log_memory("after model load")
     
     # checks to make sure timeing and lead time line up 
     if args.datetime:
@@ -294,6 +312,9 @@ def coupled_inference_hdf5(args: argparse.Namespace):
     # Calculate the required space in bytes
     required_space_atmos = np.prod(atmos_prediction_shape) * 4 * 1.12 # 4 bytes for float32 and 12% extra for metadata and sparsity 
     required_space_ocean = np.prod(ocean_prediction_shape) * 4 * 1.12
+
+
+
     
     # Get the disk usage
     statvfs = os.statvfs(args.cache_dir)
@@ -382,6 +403,7 @@ def coupled_inference_hdf5(args: argparse.Namespace):
                 ocean_prediction[i*batch_size:(i+1)*batch_size, slice(1+j*ocean_coupled_time_dim,(j+1)*ocean_coupled_time_dim+1), :, :, :, :] = ocean_output.permute(0, 2, 3, 1, 4, 5).cpu().numpy()
                 atmos_prediction[i*batch_size:(i+1)*batch_size, slice(1+j*atmos_coupled_time_dim,(j+1)*atmos_coupled_time_dim+1), :, :, :, :] = atmos_output.permute(0, 2, 3, 1, 4, 5).cpu().numpy()
 
+    log_memory("after inference loop")
     # open the hdf5 files and read the predictions into dask arrays for manipulation and saving
     f_atmos = h5py.File(f'{args.cache_dir}/atmos_prediction.hdf5', 'r')
     f_ocean = h5py.File(f'{args.cache_dir}/ocean_prediction.hdf5', 'r')
@@ -438,6 +460,8 @@ def coupled_inference_hdf5(args: argparse.Namespace):
         }
     )
 
+    log_memory("after dask array construction")
+
     # Re-scale prediction
     ocean_prediction_da[:] *= ocean_data_module.test_dataset.target_scaling['std']
     ocean_prediction_da[:] += ocean_data_module.test_dataset.target_scaling['mean']
@@ -464,6 +488,22 @@ def coupled_inference_hdf5(args: argparse.Namespace):
         ocean_prediction_ds = encode_variables_as_int(ocean_prediction_ds, compress=1)
         atmos_prediction_ds = encode_variables_as_int(atmos_prediction_ds, compress=1)
 
+
+    chunk_bytes_atmos = np.prod([args.time_chunk, args.step_chunk, 
+                                atmos_prediction_shape[2],
+                                atmos_prediction_shape[3],
+                                atmos_prediction_shape[4],
+                                atmos_prediction_shape[5]]) * 4
+    chunk_bytes_ocean = np.prod([args.time_chunk, args.step_chunk,
+                                ocean_prediction_shape[2],
+                                ocean_prediction_shape[3],
+                                ocean_prediction_shape[4],
+                                ocean_prediction_shape[5]]) * 4
+    logger.info(f"[CHUNK] atmos chunk size: {chunk_bytes_atmos/1e6:.1f} MB")
+    logger.info(f"[CHUNK] ocean chunk size: {chunk_bytes_ocean/1e6:.1f} MB")
+    logger.info(f"[CHUNK] atmos total chunks: {atmos_prediction_ds.nbytes / chunk_bytes_atmos:.0f}")
+    logger.info(f"[CHUNK] ocean total chunks: {ocean_prediction_ds.nbytes / chunk_bytes_ocean:.0f}")
+
     if getattr(args,'ocean_output_filename',None) is not None:
         ocean_output_file = os.path.join(args.output_directory, f"{args.ocean_output_filename}.nc")
     if getattr(args,'atmos_output_filename',None) is not None:
@@ -472,6 +512,9 @@ def coupled_inference_hdf5(args: argparse.Namespace):
         ocean_output_file = os.path.join(args.output_directory, f"forecast_{ocean_model_name}.nc")
         atmos_output_file = os.path.join(args.output_directory, f"forecast_{atmos_model_name}.nc")
     logger.info(f"writing forecasts to {atmos_output_file} and {ocean_output_file}")
+
+    log_memory("after to_chunked_dataset")
+
     if args.zarr:
         fs = gcsfs.GCSFileSystem()
         
@@ -489,6 +532,8 @@ def coupled_inference_hdf5(args: argparse.Namespace):
     with ProgressBar():
         ocean_write_job.compute()
         atmos_write_job.compute()
+
+    
     logger.debug("wrote file in %0.1f s", time.time() - write_time)
 
     # clean up temporary files
@@ -496,6 +541,8 @@ def coupled_inference_hdf5(args: argparse.Namespace):
     f_ocean.close()
     os.remove(f'{args.cache_dir}/atmos_prediction.hdf5')
     os.remove(f'{args.cache_dir}/ocean_prediction.hdf5')
+
+    log_memory("after zarr write")
 
 
 if __name__ == '__main__':

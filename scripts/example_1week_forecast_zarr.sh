@@ -71,8 +71,8 @@ do
         --step-chunk ${STEP_CHUNK} \
         --cache-dir ${CACHE_DIR} \
         --output-directory ${OUTPUT_DIR} \
-        --atmos-output-filename atmos_hpx64_1week \
-        --ocean-output-filename ocean_hpx64_1week \
+        --atmos-output-filename atmos_hpx64_1week_mem_log_test \
+        --ocean-output-filename ocean_hpx64_1week_mem_log_test \
         --data-directory ${DATA_DIR} \
         --atmos-dataset-name ${ATMOS_DATASET_NAME} \
         --ocean-dataset-name ${OCEAN_DATASET_NAME} \
